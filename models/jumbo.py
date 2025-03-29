@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from models.vision_transformer import VisionTransformer, LayerScale, DropPath, Mlp, Block, resample_abs_pos_embed
+from .vision_transformer import VisionTransformer, LayerScale, DropPath, Mlp, Block, resample_abs_pos_embed
 from einops import rearrange
 from timm.layers import trunc_normal_
 
