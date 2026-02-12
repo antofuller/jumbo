@@ -1,10 +1,7 @@
-""" 
-Code from DEIT3: https://github.com/facebookresearch/deit/blob/main/models_v2.py
-"""
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.utils.checkpoint
 from timm.layers import PatchEmbed, Mlp, DropPath, trunc_normal_
 from einops import rearrange
 
@@ -26,7 +23,7 @@ class Attention(nn.Module):
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.proj = nn.Linear(dim, dim)
 
-    def forward(self, x):
+    def forward(self, x, return_attn=False):
         B, N, C = x.shape
         qkv = (
             self.qkv(x)
@@ -35,17 +32,15 @@ class Attention(nn.Module):
         )
         q, k, v = qkv.unbind(0)
 
-        if self.use_scaled_dot:
-            x = F.scaled_dot_product_attention(q, k, v)
-        else:
+        if return_attn:
             q = q * self.scale
             attn = q @ k.transpose(-2, -1)
-            attn = attn.softmax(dim=-1)
-            x = attn @ v
-
-        x = x.transpose(1, 2).reshape(B, N, C)
-        x = self.proj(x)
-        return x
+            return attn.softmax(dim=-1)
+        else:
+            x = F.scaled_dot_product_attention(q, k, v)
+            x = x.transpose(1, 2).reshape(B, N, C)
+            x = self.proj(x)
+            return x
 
 
 class LayerScale(nn.Module):
@@ -94,10 +89,6 @@ class Block(nn.Module):
 
 
 class VisionTransformer(nn.Module):
-    """Vision Transformer with LayerScale (https://arxiv.org/abs/2103.17239) support
-    taken from https://github.com/rwightman/pytorch-image-models/blob/master/timm/models/vision_transformer.py
-    with slight modifications
-    """
     def __init__(
         self,
         img_size=224,
@@ -162,13 +153,8 @@ class VisionTransformer(nn.Module):
         trunc_normal_(self.cls_token, std=0.02)
         self.apply(self._init_weights)
 
-        torch.nn.init.constant_(self.head.weight, 0)  # Set weights to 0
-        if num_classes == 1_000:
-            torch.nn.init.constant_(self.head.bias, -6.9)  # init at 1/1_000
-        elif num_classes == 10_450:
-            torch.nn.init.constant_(self.head.bias, -9.25)  # init at 1/10_450
-        else:
-            raise "num_classes should be 1_000 or 10_450"
+        torch.nn.init.constant_(self.head.weight, 0)
+        torch.nn.init.constant_(self.head.bias, -math.log(num_classes))
 
     @torch.jit.ignore
     def no_weight_decay(self):
@@ -202,6 +188,7 @@ class VisionTransformer(nn.Module):
         x = self.forward_features(x)
         x = self.forward_head(x)
         return x
+
 
 def resample_abs_pos_embed(
     posemb,
